@@ -1,3 +1,5 @@
+Johns Hopkins University Reproducible Research Coursera course peer-assessed assignment 1.
+
 ## Introduction
 
 It is now possible to collect a large amount of data about personal
