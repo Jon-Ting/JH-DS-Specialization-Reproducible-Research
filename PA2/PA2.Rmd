@@ -1,0 +1,172 @@
+---
+title: "Report on the Impact of Severe Weather Events on Population Health and Economy"
+author: "Jon Ting"
+date: "17/08/2020"
+output: html_document
+---
+
+## Synopsis
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.  
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration’s (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.  
+
+The storm events causing harms to population health and economic damage are analyzed below. The results indicate that **tornadoes** had caused the most injuries and fatalities among all weather events considered. On the other hand, **floods** had brought the greatest economic impact on properties. The crops were damaged mostly by **river floods** and **icestorms** between 1950 and 2011. 
+
+
+## Data Processing
+
+### About the data
+Refer to the documentation of the database to find the variables.  
+
+- National Weather Service [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)  
+- National Climatic Data Center Storm Events [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf)  
+
+The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete.
+
+### Set options and load required packages
+```{r Setup and load libraries, cache=TRUE}
+knitr::opts_chunk$set(warning=FALSE, fig.height=5, fig.width=10)
+library(ggplot2)
+library(gridExtra)
+```
+
+### Load data and examine it
+The bz2 zipped data was downloaded from the Reproducible Research course website. It is then loaded with read.csv command.
+```{r Load data, cache=TRUE}
+storm_data <- read.csv("repdata_data_StormData.csv.bz2")
+```
+
+Structure of the data:
+```{r Structure, cache=TRUE}
+str(storm_data)
+```
+
+### Extract variables of interest
+Appropriate variables were extracted from the dataset to answer the following questions:  
+
+- Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+- Across the United States, which types of events have the greatest economic consequences?
+
+These variables include:
+
+- EVTYPE: Type of weather event
+- FATALITIES: Number of deaths
+- INJURIES: Number of injuries
+- PROPDMG: Property damages
+- PROPDMGEXP: Units for property damage value
+- CROPDMG: Crop damages
+- CROPDMGEXP: Units for crop damage value
+```{r Extract variables of interest, cache=TRUE}
+data <- storm_data[, c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+head(data)
+```
+
+### Handling missing values and unifying units
+It is clear that there are were entries in the units columns. Prior to dealing with them, the presence of missing values in the other numeric columns was checked for:
+```{r Missing values, cache=TRUE}
+sum(is.na(data))
+```
+
+Since there are none, only the units need to be dealt with. 
+```{r Unit columns, cache=TRUE}
+sort(table(data$PROPDMGEXP))
+sort(table(data$CROPDMGEXP))
+```
+
+Having different units makes the comparison of the values hard anyway, so unification of the different units was carried out following these rules:
+
+- B/b: billion dollars
+- M/m: million dollars
+- K/k: thousand dollars
+- H/h: hundred dollars
+- +: dollars
+- -: None
+- ?: None
+- Blank: None
+
+```{r Unify units, cache=TRUE}
+# Replace the symbols by numerical exponents
+data$PROPDMGEXP[grepl(pattern="B", x=data$PROPDMGEXP, ignore.case=TRUE)] <- 9
+data$CROPDMGEXP[grepl(pattern="B", x=data$CROPDMGEXP, ignore.case=TRUE)] <- 9
+data$PROPDMGEXP[grepl(pattern="M", x=data$PROPDMGEXP, ignore.case=TRUE)] <- 6
+data$CROPDMGEXP[grepl(pattern="M", x=data$CROPDMGEXP, ignore.case=TRUE)] <- 6
+data$PROPDMGEXP[grepl(pattern="K", x=data$PROPDMGEXP, ignore.case=TRUE)] <- 3
+data$CROPDMGEXP[grepl(pattern="K", x=data$CROPDMGEXP, ignore.case=TRUE)] <- 3
+data$PROPDMGEXP[grepl(pattern="H", x=data$PROPDMGEXP, ignore.case=TRUE)] <- 2
+data$CROPDMGEXP[grepl(pattern="H", x=data$CROPDMGEXP, ignore.case=TRUE)] <- 2
+data$PROPDMGEXP[grepl(pattern="\\+", x=data$PROPDMGEXP, ignore.case=TRUE)] <- 0
+data$CROPDMGEXP[grepl(pattern="\\+", x=data$CROPDMGEXP, ignore.case=TRUE)] <- 0
+
+# For entries without property or crop damage, replace with a small number
+data$PROPDMGEXP[grepl(pattern="\\-", x=data$PROPDMGEXP, ignore.case=TRUE)] <- -3
+data$CROPDMGEXP[grepl(pattern="\\-", x=data$CROPDMGEXP, ignore.case=TRUE)] <- -3
+data$PROPDMGEXP[grepl(pattern="\\?", x=data$PROPDMGEXP, ignore.case=TRUE)] <- -3
+data$CROPDMGEXP[grepl(pattern="\\?", x=data$CROPDMGEXP, ignore.case=TRUE)] <- -3
+data$PROPDMGEXP[grepl(pattern="^$", x=data$PROPDMGEXP, ignore.case=TRUE)] <- -3
+data$CROPDMGEXP[grepl(pattern="^$", x=data$CROPDMGEXP, ignore.case=TRUE)] <- -3
+
+# Compute the damage values by raising 10 to the power of the exponents
+data$PROPDMG <- data$PROPDMG * 10^as.numeric(data$PROPDMGEXP)
+data$CROPDMG <- data$CROPDMG * 10^as.numeric(data$CROPDMGEXP)
+
+# Filter out the small values as they are supposed to be zeros
+data$PROPDMG[which(data$PROPDMG < 0.01)] <- 0
+data$CROPDMG[which(data$PROPDMG < 0.01)] <- 0
+```
+
+
+## Analysis
+The total fatalities and total injuries as grouped by each event type are computed:
+```{r Total fatalities and injuries, cache=TRUE}
+deaths <- aggregate(x=data$FATALITIES, by=list(data$EVTYPE), FUN=sum)
+injuries <- aggregate(x=data$INJURIES, by=list(data$EVTYPE), FUN=sum)
+names(deaths) <- c("Event_Type", "Death_Number")
+names(injuries) <- c("Event_Type", "Injury_Number")
+```
+
+Followed by the total property and crop damages as grouped by each event type:
+```{r Total property and crop damages, cache=TRUE}
+prop_dmg <- aggregate(x=data$PROPDMG, by=list(data$EVTYPE), FUN=sum)
+crop_dmg <- aggregate(x=data$CROPDMG, by=list(data$EVTYPE), FUN=sum)
+names(prop_dmg) <- c("Event_Type", "Property_Damage")
+names(crop_dmg) <- c("Event_Type", "Crop_Damage")
+```
+
+The top 5 events that brought about each category were then extracted out:
+```{r Top 5 events, cache=TRUE}
+deaths <- deaths[order(desc(deaths$Death_Number)), ][1:5, ]
+injuries <- injuries[order(desc(injuries$Injury_Number)), ][1:5, ]
+prop_dmg <- prop_dmg[order(desc(prop_dmg$Property_Damage)), ][1:5, ]
+crop_dmg <- crop_dmg[order(desc(crop_dmg$Crop_Damage)), ][1:5, ]
+```
+
+
+## Results
+The top 5 events that had caused the most fatalities and injuries are shown below:
+```{r Population health impact, cache=TRUE}
+death_plt <- ggplot(data=deaths, aes(x=Event_Type, y=Death_Number, fill=Event_Type)) + 
+  geom_bar(stat="identity", show.legend=FALSE) + 
+  theme(axis.text.x=element_text(angle=30, hjust=1)) + 
+  labs(x="Event Type", y="Total Number of Fatailities")
+injury_plt <- ggplot(data=injuries, aes(x=Event_Type, y=Injury_Number, fill=Event_Type)) + 
+  geom_bar(stat="identity", show.legend=FALSE) + 
+  theme(axis.text.x=element_text(angle=30, hjust=1)) + 
+  labs(x="Event Type", y="Total Number of Injuries")
+grid.arrange(death_plt, injury_plt, ncol=2, top="Top 5 Events causing Fatalities and Injuries")
+```
+
+The top 5 events that had caused the most property and crop damages are shown below:
+```{r Economic impact, cache=TRUE}
+prop_plt <- ggplot(data=prop_dmg, aes(x=Event_Type, y=Property_Damage, fill=Event_Type)) + 
+  geom_bar(stat="identity", show.legend=FALSE) + 
+  theme(axis.text.x=element_text(angle=30, hjust=1)) + 
+  labs(x="Event Type", y="Total Amount of Property Damage (Dollars)")
+crop_plt <- ggplot(data=crop_dmg, aes(x=Event_Type, y=Crop_Damage, fill=Event_Type)) + 
+  geom_bar(stat="identity", show.legend=FALSE) + 
+  theme(axis.text.x=element_text(angle=30, hjust=1)) + 
+  labs(x="Event Type", y="Total Amount of Crop Damage (Dollars)")
+grid.arrange(prop_plt, crop_plt, ncol=2, top="Top 5 Events causing Property and Crop Damages")
+```
+
+## Summary
+It was concluded from the analysis that tornadoes had caused the greatest damage to population health while floods had the worst impact on the economy. Floods in general brought the most damages to properties while river floods and icestorms were the most dangerous for crops.
